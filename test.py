@@ -25,23 +25,33 @@ def get_sql_url(layer, args):
         "&".join(["%s=%s" % (name, urllib.quote(unicode(value)))
                   for name, value in args.iteritems()]))
 
-def get_layer_fields(layer):
-    return json.load(
-        load_url(
-            get_sql_url(
-                layer,
-                dict(
-                    page=0,
-                    sort_order="asc",
-                    order_by="",
-                    filter_column="",
-                    filter_value="",
-                    sql_source="null",
-                    limit=0,
-                    q=layer["options"]["sql"]
-                    ))))["fields"]
+def exec_sql(layer, **kw):
+    try:
+        return json.load(
+            load_url(
+                get_sql_url(layer, kw)))
+    except urllib2.HTTPError as e:
+        if "q" in kw:
+            e.msg = "%s while executing %s" % (e.msg, kw["q"])
+        raise e
 
-def get_layer_data_sql(layer, bbox):
+def get_layer_fields(layer):
+    return exec_sql(
+        layer,
+        page=0,
+        sort_order="asc",
+        order_by="",
+        filter_column="",
+        filter_value="",
+        sql_source="null",
+        limit=0,
+        q=layer["options"]["sql"]
+        )["fields"]
+
+def get_layer_fields_sql(layer, filter = ["the_geom"]):
+    return ",".join([name for name in layer["fields"].keys() if name not in filter])
+
+def get_layer_data_sql(layer, bbox, **kw):
     return """
         select
           ST_Intersection(ST_MakeEnvelope(%(lonmin)s, %(latmin)s, %(lonmax)s, %(latmax)s, 4326), the_geom) the_geom,
@@ -52,67 +62,88 @@ def get_layer_data_sql(layer, bbox):
           ST_Contains(ST_MakeEnvelope(%(lonmin)s, %(latmin)s, %(lonmax)s, %(latmax)s, 4326), the_geom)
         order by
           cartodb_id asc
-    """ % {
-        "src": layer["options"]["sql"],
-        "fields": ",".join([name for name in layer["fields"].keys() if name != "the_geom"]),
-        "latmin": bbox.latmin,
-        "latmax": bbox.latmax,
-        "lonmin": bbox.lonmin,
-        "lonmax": bbox.lonmax
-    }
+    """ % {"src": layer["options"]["sql"],
+           "fields": get_layer_fields_sql(layer),
+           "latmin": bbox.latmin,
+           "latmax": bbox.latmax,
+           "lonmin": bbox.lonmin,
+           "lonmax": bbox.lonmax
+           }
+
+def get_layer_simplified_data_sql(layer, tolerance = None, **kw):
+    if tolerance is None:
+        return get_layer_data_sql(layer, **kw)
+    return """
+      select
+        ST_Simplify(the_geom, %(tolerance)s, true),
+        %(fields)s
+      from
+        (%(src)s) __wrapped__layer_simplified_data
+    """ % {"src": get_layer_data_sql(layer, **kw),
+           "fields": get_layer_fields_sql(layer)
+           }
 
 
-def get_layer_data_json_sql(layer, bbox):
+#   ST_Centroid(gc) AS centroid,
+#   ST_MinimumBoundingCircle(gc) AS circle,
+#   sqrt(ST_Area(ST_MinimumBoundingCircle(gc)) / pi()) AS radius
+#   SELECT unnest(ST_ClusterWithin(geom, 100)) gc
+
+def get_layer_data_points_sql(layer, **kw):
     return """
         select
-          ST_AsGeoJSON(the_geom, 8) the_geom,
+          series,
+          geometry_type,
+          ST_Y(the_geom) lat,
+          ST_X(the_geom) lon,
           %(fields)s
         from
-          (%(src)s) __wrapped__layer_data_json
+          (select
+             row_number() over () as series,
+             ST_GeometryType(__wrapped__layer_data_points.the_geom) as geometry_type,
+             (ST_DumpPoints(__wrapped__layer_data_points.the_geom)).geom as the_geom,
+             %(fields)s
+           from
+             (%(src)s) __wrapped__layer_data_points
+          ) __wrapped__layer_data_points_2
     """ % {
-        "src": get_layer_data_sql(layer, bbox),
-        "fields": ",".join([name for name in layer["fields"].keys() if name != "the_geom"])
+        "src": get_layer_simplified_data_sql(layer, **kw),
+        "fields": get_layer_fields_sql(layer)
     }
 
-def get_layer_data(layer, bbox):
-    args = dict(
-        page=0,
-        sort_order="asc",
-        order_by="",
-        filter_column="",
-        filter_value="",
-        sql_source="null",
-        q=get_layer_data_json_sql(layer, bbox)
-        )
-
-    layer_data = json.load(load_url(get_sql_url(layer, args)))
-
-    for row in layer_data["rows"]:
-        row["the_geom"] = json.loads(row["the_geom"])
-
-    return layer_data['rows']
-
-def get_layer_data_size(layer, bbox):
-    query_sql = get_layer_data_sql(layer, bbox)
-    size_sql = """
+def get_layer_data_size_sql(layer, **kw):
+    return """
         select
-          sum(ST_NPoints(the_geom)) as size
+          count(*) as size
         from
-          (%s) as __wrapped2
-    """ % (query_sql,)
+          (%s) as __wrapped_layer_data_size
+    """ % (get_layer_data_points_sql(layer, **kw),)
 
-    args = dict(
+
+
+def get_layer_data(layer, **kw):
+    return exec_sql(
+        layer,
         page=0,
         sort_order="asc",
         order_by="",
         filter_column="",
         filter_value="",
         sql_source="null",
-        q=size_sql
-        )
+        q=get_layer_data_points_sql(layer, **kw)
+        )['rows']
 
-    res = json.load(load_url(get_sql_url(layer, args)))
-    return res["rows"][0]["size"]
+def get_layer_data_size(layer, **kw):
+    return exec_sql(
+        layer,
+        page=0,
+        sort_order="asc",
+        order_by="",
+        filter_column="",
+        filter_value="",
+        sql_source="null",
+        q=get_layer_data_size_sql(layer, **kw)
+        )["rows"][0]["size"]
 
 def find_layers(tileset_spec):
     layers = []
@@ -142,30 +173,35 @@ def load_tile(tileset = None, time = None, bbox = None):
 
     for layer in layers:
         layer['fields'] = get_layer_fields(layer)
-        print "NNNNNNNNNNNN", get_layer_data_size(layer, bbox)
-        layer["data"] = get_layer_data(layer, bbox)
+        print "LAYER SIZE", get_layer_data_size(layer, bbox=bbox)
+        layer["data"] = get_layer_data(layer, bbox=bbox)
 
-    data = reduce(operator.add, [layer["data"] for layer in layers], [])
-    rows = []
-    for row in data:
-        row_data = {}
-        for col_name, col in layer["fields"].iteritems():
-            if col["type"] == "number":
-                row_data[col_name] = row[col_name]
-            elif col["type"] == "date":
-                row_data[col_name] = (datetime.datetime.strptime(row[col_name], "%Y-%m-%dT%H:%M:%SZ") - datetime.datetime(1970, 1, 1)).total_seconds()
+    def mangle_row(row):
+        def mangle_value(key, value):
+            if key in layer["fields"]:
+                col = layer["fields"][key]
+                if col["type"] == "number":
+                    return value
+                elif col["type"] == "date":
+                    return (datetime.datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ") - datetime.datetime(1970, 1, 1)).total_seconds()
+            if key in ["series", "lat", "lon"]:
+                return value
+            return None
+        return {key: mangle_value(key, value)
+                for key, value in row.iteritems()
+                if mangle_value(key, value) is not None}
 
-        geom = row["the_geom"]
+    data = [mangle_row(row)
+            for row in reduce(operator.add,
+                              [layer["data"] for layer in layers], [])]
 
-        if geom['type'] == 'LineString':
-            for coord in geom['coordinates']:
-                out_row = dict(row_data)
-                out_row.update({
-                        "lat": coord[0],
-                        "lon": coord[1],
-                        })
-                rows.append(out_row)
+    print "ROWS", len(data)
+    tile = vectortile.Tile.fromdata(data)
 
-    # print(vectortile.Tile.fromdata(rows))
+    print "Tile made"
+    with open("tile", "w") as f:
+        f.write(str(tile))
+    print "Tile saved"
 
 load_tile(urllib.quote("http://cartodb.localhost:4711/user/dev/api/v2/viz/2cf0043c-97ba-11e5-87b3-0242ac110002/viz.json"), None, "0,0,90,90")
+# load_tile(urllib.quote("http://cartodb.skytruth.org/user/dev/api/v2/viz/2cf0043c-97ba-11e5-87b3-0242ac110002/viz.json"), None, "0,0,90,90")
