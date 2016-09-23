@@ -26,10 +26,19 @@ def get_sql_url(layer, args):
                   for name, value in args.iteritems()]))
 
 def exec_sql(layer, **kw):
+    args = dict(
+        page=0,
+        sort_order="asc",
+        order_by="",
+        filter_column="",
+        filter_value="",
+        sql_source="null"
+        )
+    args.update(kw)
     try:
         return json.load(
             load_url(
-                get_sql_url(layer, kw)))
+                get_sql_url(layer, args)))
     except urllib2.HTTPError as e:
         if "q" in kw:
             e.msg = "%s while executing %s" % (e.msg, kw["q"])
@@ -52,9 +61,13 @@ def get_layer_fields_sql(layer, filter = ["the_geom"]):
     return ",".join([name for name in layer["fields"].keys() if name not in filter])
 
 def get_layer_data_sql(layer, bbox, **kw):
+    series_group_sql = ""
+    if "series_group" not in layer["fields"]:
+        series_group_sql = "row_number() over () as series_group,"
     return """
         select
-          ST_Intersection(ST_MakeEnvelope(%(lonmin)s, %(latmin)s, %(lonmax)s, %(latmax)s, 4326), the_geom) the_geom,
+          %(series_group_sql)s
+          (ST_Dump(ST_Intersection(ST_MakeEnvelope(%(lonmin)s, %(latmin)s, %(lonmax)s, %(latmax)s, 4326), the_geom))).geom as the_geom,
           %(fields)s
         from
           (%(src)s) __wrapped__layer_data
@@ -63,6 +76,7 @@ def get_layer_data_sql(layer, bbox, **kw):
         order by
           cartodb_id asc
     """ % {"src": layer["options"]["sql"],
+           "series_group_sql": series_group_sql,
            "fields": get_layer_fields_sql(layer),
            "latmin": bbox.latmin,
            "latmax": bbox.latmax,
@@ -75,12 +89,13 @@ def get_layer_simplified_data_sql(layer, tolerance = None, **kw):
         return get_layer_data_sql(layer, **kw)
     return """
       select
-        ST_Simplify(the_geom, %(tolerance)s, true),
+        ST_SimplifyPreserveTopology(the_geom, %(tolerance)s) the_geom,
         %(fields)s
       from
         (%(src)s) __wrapped__layer_simplified_data
     """ % {"src": get_layer_data_sql(layer, **kw),
-           "fields": get_layer_fields_sql(layer)
+           "fields": get_layer_fields_sql(layer),
+           "tolerance": tolerance
            }
 
 
@@ -90,9 +105,12 @@ def get_layer_simplified_data_sql(layer, tolerance = None, **kw):
 #   SELECT unnest(ST_ClusterWithin(geom, 100)) gc
 
 def get_layer_data_points_sql(layer, **kw):
+    series_sql = ""
+    if "series" not in layer["fields"]:
+        series_sql = "row_number() over () as series,"
     return """
         select
-          series,
+          %(series_sql)s
           geometry_type,
           ST_Y(the_geom) lat,
           ST_X(the_geom) lon,
@@ -108,6 +126,7 @@ def get_layer_data_points_sql(layer, **kw):
           ) __wrapped__layer_data_points_2
     """ % {
         "src": get_layer_simplified_data_sql(layer, **kw),
+        "series_sql": series_sql,
         "fields": get_layer_fields_sql(layer)
     }
 
@@ -119,30 +138,30 @@ def get_layer_data_size_sql(layer, **kw):
           (%s) as __wrapped_layer_data_size
     """ % (get_layer_data_points_sql(layer, **kw),)
 
-
+def get_layer_data_max_geometry_size_sql(layer, **kw):
+    return """
+        select
+          max(ST_NPoints(the_geom)) as size
+        from
+          (%s) as __wrapped_layer_data_max_geometry_size
+    """ % (get_layer_simplified_data_sql(layer, **kw),)
 
 def get_layer_data(layer, **kw):
     return exec_sql(
         layer,
-        page=0,
-        sort_order="asc",
-        order_by="",
-        filter_column="",
-        filter_value="",
-        sql_source="null",
         q=get_layer_data_points_sql(layer, **kw)
         )['rows']
 
 def get_layer_data_size(layer, **kw):
     return exec_sql(
         layer,
-        page=0,
-        sort_order="asc",
-        order_by="",
-        filter_column="",
-        filter_value="",
-        sql_source="null",
         q=get_layer_data_size_sql(layer, **kw)
+        )["rows"][0]["size"]
+
+def get_layer_data_max_geometry_size(layer, **kw):
+    return exec_sql(
+        layer,
+        q=get_layer_data_max_geometry_size_sql(layer, **kw)
         )["rows"][0]["size"]
 
 def find_layers(tileset_spec):
@@ -174,7 +193,26 @@ def load_tile(tileset = None, time = None, bbox = None):
     for layer in layers:
         layer['fields'] = get_layer_fields(layer)
         print "LAYER SIZE", get_layer_data_size(layer, bbox=bbox)
-        layer["data"] = get_layer_data(layer, bbox=bbox)
+        print "LAYER MAX GEOM SIZE", get_layer_data_max_geometry_size(layer, bbox=bbox)
+
+        options = dict(bbox=bbox)
+        
+        while True:
+            size = get_layer_data_size(layer, **options)
+            print "size %s at %s" % (size, options)
+            if size < 1000: break
+            if "tolerance" not in options:
+                options["tolerance"] = 1e-3
+                continue
+            geom_size = get_layer_data_max_geometry_size(layer, **options)
+            if geom_size > 2:
+                print "geom size %s at %s" % (size, options)
+                options["tolerance"] *= 10.0
+                continue
+            print "END"
+            break
+
+        layer["data"] = get_layer_data(layer, **options)
 
     def mangle_row(row):
         def mangle_value(key, value):
