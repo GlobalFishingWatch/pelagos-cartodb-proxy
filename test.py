@@ -57,13 +57,26 @@ def get_layer_fields(layer):
         q=layer["options"]["sql"]
         )["fields"]
 
-def get_layer_fields_sql(layer, filter = ["the_geom"]):
-    return ",".join([name for name in layer["fields"].keys() if name not in filter])
+def get_layer_fields_sql(layer, filter = ["the_geom"], func = None, types = ["date", "numeric"]):
+    fields = layer["fields"].keys()
+    fields = [name for name in fields if name not in filter]
+    if types is not None:
+        fields = [name for name in fields if
+                  layer["fields"][name]["type"] in types]
+    if func:
+        fields = ["%s as %s" % (func(name), name) for name in fields]
+    return ",".join(fields)
 
 def get_layer_data_sql(layer, bbox, **kw):
     series_group_sql = ""
     if "series_group" not in layer["fields"]:
         series_group_sql = "row_number() over () as series_group,"
+
+    def convert_col(name):
+        if layer["fields"][name]["type"] == "date":
+            return "extract(epoch from %s at time zone 'utc')" % name
+        return name
+
     return """
         select
           %(series_group_sql)s
@@ -77,7 +90,7 @@ def get_layer_data_sql(layer, bbox, **kw):
           cartodb_id asc
     """ % {"src": layer["options"]["sql"],
            "series_group_sql": series_group_sql,
-           "fields": get_layer_fields_sql(layer),
+           "fields": get_layer_fields_sql(layer, func=convert_col),
            "latmin": bbox.latmin,
            "latmax": bbox.latmax,
            "lonmin": bbox.lonmin,
@@ -120,7 +133,6 @@ def get_layer_data_points_sql(layer, **kw):
         select
           %(series_group_sql)s
           %(series_sql)s
-          ST_GeometryType(__wrapped__layer_data_points.the_geom) as geometry_type,
           (ST_DumpPoints(__wrapped__layer_data_points.the_geom)).geom as the_geom,
           %(fields)s
         from
@@ -132,29 +144,29 @@ def get_layer_data_points_sql(layer, **kw):
         "fields": get_layer_fields_sql(layer)
     }
 
-def get_layer_data_clustered_points_sql(layer, radius=None, **kw):
-    if radius is None:
+def get_layer_data_clustered_points_sql(layer, hashlen=None, **kw):
+    if hashlen is None:
         return get_layer_data_points_sql(layer, **kw)
     return """
-        select
-          100000 + row_number() over () AS series_group,
-          100000 + row_number() over () AS series,
-          ST_Centroid(gc) AS the_geom,
-          ST_NumGeometries(gc) as weight,
-          sqrt(ST_Area(ST_MinimumBoundingCircle(gc)) / pi()) AS sigma,
-          %(filtered_fields)s
-        from
-          (select
-             unnest(ST_ClusterWithin(the_geom, %(radius)s)) gc,
-             %(fields)s
-           from
-             (%(src)s) __wrapped__layer_data_clustered_points_1
-          ) __wrapped__layer_data_clustered_points_2
+      select
+        100000 + row_number() over () AS series_group,
+        100000 + row_number() over () AS series,
+        ST_Centroid(ST_GeomFromGeoHash(geo_hash)) the_geom,
+        %(filtered_fields)s
+      from
+        (select
+           ST_GeoHash(the_geom, %(hashlen)s) as geo_hash,
+           %(avg_fields)s
+         from
+           (%(src)s) __wrapped__layer_data_clustered_points_1
+         group by
+           ST_GeoHash(the_geom, %(hashlen)s)
+        ) __wrapped__layer_data_clustered_points
     """ % {
         "src": get_layer_simplified_data_sql(layer, **kw),
-        "radius": radius,
+        "hashlen": hashlen,
         "filtered_fields": get_layer_fields_sql(layer, filter=("sigma", "weight", "series", "series_group")),
-        "fields": get_layer_fields_sql(layer)
+        "avg_fields": get_layer_fields_sql(layer, func=lambda name: "avg(%s)" % name)
     }
 
 
@@ -169,7 +181,6 @@ def get_layer_data_points_lat_lon_sql(layer, **kw):
         select
           %(series_group_sql)s
           %(series_sql)s
-          geometry_type,
           ST_Y(the_geom) lat,
           ST_X(the_geom) lon,
           %(fields)s
@@ -261,33 +272,17 @@ def load_tile(tileset = None, time = None, bbox = None, max_size = 100):
                 print "geom size %s at %s" % (size, options)
                 options["tolerance"] *= 10.0
                 continue
-            if "radius" not in options:
-                options["radius"] = 1.0
+            if "hashlen" not in options:
+                options["hashlen"] = 20
                 continue
-            options["radius"] *= 10.0
-            if options["radius"] > 4000000:
+            options["hashlen"] -= 1
+            if options["hashlen"] <= 0:
                 break
 
         layer["data"] = get_layer_data(layer, **options)
 
-    def mangle_row(row):
-        def mangle_value(key, value):
-            if key in layer["fields"]:
-                col = layer["fields"][key]
-                if col["type"] == "number":
-                    return value
-                elif col["type"] == "date":
-                    return (datetime.datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ") - datetime.datetime(1970, 1, 1)).total_seconds()
-            if key in ["series", "lat", "lon"]:
-                return value
-            return None
-        return {key: mangle_value(key, value)
-                for key, value in row.iteritems()
-                if mangle_value(key, value) is not None}
-
-    data = [mangle_row(row)
-            for row in reduce(operator.add,
-                              [layer["data"] for layer in layers], [])]
+    data = reduce(operator.add,
+                  [layer["data"] for layer in layers], [])
 
     print "ROWS", len(data)
     tile = vectortile.Tile.fromdata(data)
