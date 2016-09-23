@@ -6,6 +6,7 @@ import urllib
 import urllib2
 import operator
 import datetime
+import sys
 
 def load_url(url):
     try:
@@ -246,7 +247,6 @@ def find_layers(tileset_spec):
     return layers
 
 def load_tile(tileset = None, time = None, bbox = None, max_size = 100):
-    tileset = urllib.unquote(tileset)
     bbox = vectortile.Bbox.fromstring(bbox)
 
     tileset_spec = json.load(load_url(tileset))
@@ -285,12 +285,16 @@ def load_tile(tileset = None, time = None, bbox = None, max_size = 100):
                   [layer["data"] for layer in layers], [])
 
     print "ROWS", len(data)
-    tile = vectortile.Tile.fromdata(data)
 
-    print "Tile made"
-    with open("tile", "w") as f:
-        f.write(str(tile))
-    print "Tile saved"
+    return vectortile.Tile.fromdata(data)
 
-load_tile(urllib.quote("http://cartodb.localhost:4711/user/dev/api/v2/viz/2cf0043c-97ba-11e5-87b3-0242ac110002/viz.json"), None, "0,0,90,90")
-# load_tile(urllib.quote("http://cartodb.skytruth.org/user/dev/api/v2/viz/2cf0043c-97ba-11e5-87b3-0242ac110002/viz.json"), None, "0,0,90,90")
+if __name__ == "__main__":
+    if len(sys.argv) != 4:
+        print """Usage: test.py http://cartodb.localhost:4711/user/dev/api/v2/viz/2cf0043c-97ba-11e5-87b3-0242ac110002/viz.json 0,0,90,90 mytile"""
+    else:
+        viz, bbox, filename = sys.argv[1:]
+
+        tile = load_tile(viz, bbox=bbox)
+
+        with open(filename, "w") as f:
+            f.write(str(tile))
