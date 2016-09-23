@@ -6,6 +6,7 @@ import urllib
 import urllib2
 import operator
 import datetime
+import json
 import sys
 
 def load_url(url):
@@ -58,7 +59,7 @@ def get_layer_fields(layer):
         q=layer["options"]["sql"]
         )["fields"]
 
-def get_layer_fields_sql(layer, filter = ["the_geom"], func = None, types = ["date", "numeric"]):
+def get_layer_fields_list(layer, filter = ["the_geom"], func = None, types = ["date", "number"]):
     fields = layer["fields"].keys()
     fields = [name for name in fields if name not in filter]
     if types is not None:
@@ -66,7 +67,10 @@ def get_layer_fields_sql(layer, filter = ["the_geom"], func = None, types = ["da
                   layer["fields"][name]["type"] in types]
     if func:
         fields = ["%s as %s" % (func(name), name) for name in fields]
-    return ",".join(fields)
+    return fields
+
+def get_layer_fields_sql(*arg, **kw):
+    return ",".join(get_layer_fields_list(*arg, **kw))
 
 def get_layer_data_sql(layer, bbox, **kw):
     series_group_sql = ""
@@ -246,7 +250,7 @@ def find_layers(tileset_spec):
     find_layers(tileset_spec)
     return layers
 
-def load_tile(tileset = None, time = None, bbox = None, max_size = 100):
+def load_tile(tileset = None, time = None, bbox = None, max_size = 16000, **kw):
     bbox = vectortile.Bbox.fromstring(bbox)
 
     tileset_spec = json.load(load_url(tileset))
@@ -288,13 +292,57 @@ def load_tile(tileset = None, time = None, bbox = None, max_size = 100):
 
     return vectortile.Tile.fromdata(data)
 
-if __name__ == "__main__":
-    if len(sys.argv) != 4:
-        print """Usage: tilegen.py http://cartodb.localhost:4711/user/dev/api/v2/viz/2cf0043c-97ba-11e5-87b3-0242ac110002/viz.json 0,0,90,90 mytile"""
-    else:
-        viz, bbox, filename = sys.argv[1:]
+def load_header(tileset, **kw):
+    tileset_spec = json.load(load_url(tileset))
 
-        tile = load_tile(viz, bbox=bbox)
+    layers = find_layers(tileset_spec)
+
+    fields = set()
+    for layer in layers:
+        layer['fields'] = get_layer_fields(layer)
+        fields.update(get_layer_fields_list(layer))
+
+    for name in ('lat', 'lon', 'series', 'series_group', 'weight', 'sigma'):
+        fields.add(name)
+
+    return {
+        "tilesetName": tileset_spec["title"],
+        "seriesTilesets": False,
+        "infoUsesSelection": True,
+        "colsByName": {name: {"type": "Float32"}
+                       for name in fields}
+        }
+
+if __name__ == "__main__":
+    args = []
+    kws = {"max_size": "16000"}
+    for arg in sys.argv[1:]:
+        if arg.startswith('--'):
+            arg = arg[2:]
+            value = True
+            if '=' in arg:
+                arg, value = arg.split('=')
+            kws[arg] = value
+        else:
+            args.append(arg)
+
+    kws["max_size"] = int(kws["max_size"])
+    
+    if not args:
+        print """Usages:
+    tilegen.py tile [--max_size=16000] http://cartodb.localhost:4711/user/dev/api/v2/viz/2cf0043c-97ba-11e5-87b3-0242ac110002/viz.json 0,0,90,90 mytile
+    tilegen.py header http://cartodb.localhost:4711/user/dev/api/v2/viz/2cf0043c-97ba-11e5-87b3-0242ac110002/viz.json myheader
+"""
+    elif args[0] == "tile":
+        viz, bbox, filename = args[1:]
+
+        tile = load_tile(viz, bbox=bbox, **kws)
 
         with open(filename, "w") as f:
             f.write(str(tile))
+    elif args[0] == "header":
+        viz, filename = args[1:]
+        header = load_header(viz, **kws)
+        with open(filename, "w") as f:
+            f.write(json.dumps(header))
+
