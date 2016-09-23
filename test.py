@@ -85,15 +85,20 @@ def get_layer_data_sql(layer, bbox, **kw):
            }
 
 def get_layer_simplified_data_sql(layer, tolerance = None, **kw):
+    series_group_sql = ""
+    if "series_group" not in layer["fields"]:
+        series_group_sql = "series_group,"
     if tolerance is None:
         return get_layer_data_sql(layer, **kw)
     return """
       select
+        %(series_group_sql)s
         ST_SimplifyPreserveTopology(the_geom, %(tolerance)s) the_geom,
         %(fields)s
       from
         (%(src)s) __wrapped__layer_simplified_data
     """ % {"src": get_layer_data_sql(layer, **kw),
+           "series_group_sql": series_group_sql,
            "fields": get_layer_fields_sql(layer),
            "tolerance": tolerance
            }
@@ -108,24 +113,71 @@ def get_layer_data_points_sql(layer, **kw):
     series_sql = ""
     if "series" not in layer["fields"]:
         series_sql = "row_number() over () as series,"
+    series_group_sql = ""
+    if "series_group" not in layer["fields"]:
+        series_group_sql = "series_group,"
     return """
         select
+          %(series_group_sql)s
+          %(series_sql)s
+          ST_GeometryType(__wrapped__layer_data_points.the_geom) as geometry_type,
+          (ST_DumpPoints(__wrapped__layer_data_points.the_geom)).geom as the_geom,
+          %(fields)s
+        from
+          (%(src)s) __wrapped__layer_data_points
+    """ % {
+        "src": get_layer_simplified_data_sql(layer, **kw),
+        "series_group_sql": series_group_sql,
+        "series_sql": series_sql,
+        "fields": get_layer_fields_sql(layer)
+    }
+
+def get_layer_data_clustered_points_sql(layer, radius=None, **kw):
+    if radius is None:
+        return get_layer_data_points_sql(layer, **kw)
+    return """
+        select
+          100000 + row_number() over () AS series_group,
+          100000 + row_number() over () AS series,
+          ST_Centroid(gc) AS the_geom,
+          ST_NumGeometries(gc) as weight,
+          sqrt(ST_Area(ST_MinimumBoundingCircle(gc)) / pi()) AS sigma,
+          %(filtered_fields)s
+        from
+          (select
+             unnest(ST_ClusterWithin(the_geom, %(radius)s)) gc,
+             %(fields)s
+           from
+             (%(src)s) __wrapped__layer_data_clustered_points_1
+          ) __wrapped__layer_data_clustered_points_2
+    """ % {
+        "src": get_layer_simplified_data_sql(layer, **kw),
+        "radius": radius,
+        "filtered_fields": get_layer_fields_sql(layer, filter=("sigma", "weight", "series", "series_group")),
+        "fields": get_layer_fields_sql(layer)
+    }
+
+
+def get_layer_data_points_lat_lon_sql(layer, **kw):
+    series_sql = ""
+    if "series" not in layer["fields"]:
+        series_sql = "series,"
+    series_group_sql = ""
+    if "series_group" not in layer["fields"]:
+        series_group_sql = "series_group,"
+    return """
+        select
+          %(series_group_sql)s
           %(series_sql)s
           geometry_type,
           ST_Y(the_geom) lat,
           ST_X(the_geom) lon,
           %(fields)s
         from
-          (select
-             row_number() over () as series,
-             ST_GeometryType(__wrapped__layer_data_points.the_geom) as geometry_type,
-             (ST_DumpPoints(__wrapped__layer_data_points.the_geom)).geom as the_geom,
-             %(fields)s
-           from
-             (%(src)s) __wrapped__layer_data_points
-          ) __wrapped__layer_data_points_2
+          (%(src)s) __wrapped__layer_data_points_lat_lng
     """ % {
-        "src": get_layer_simplified_data_sql(layer, **kw),
+        "src": get_layer_data_clustered_points_sql(layer, **kw),
+        "series_group_sql": series_group_sql,
         "series_sql": series_sql,
         "fields": get_layer_fields_sql(layer)
     }
@@ -136,7 +188,7 @@ def get_layer_data_size_sql(layer, **kw):
           count(*) as size
         from
           (%s) as __wrapped_layer_data_size
-    """ % (get_layer_data_points_sql(layer, **kw),)
+    """ % (get_layer_data_clustered_points_sql(layer, **kw),)
 
 def get_layer_data_max_geometry_size_sql(layer, **kw):
     return """
@@ -149,7 +201,7 @@ def get_layer_data_max_geometry_size_sql(layer, **kw):
 def get_layer_data(layer, **kw):
     return exec_sql(
         layer,
-        q=get_layer_data_points_sql(layer, **kw)
+        q=get_layer_data_points_lat_lon_sql(layer, **kw)
         )['rows']
 
 def get_layer_data_size(layer, **kw):
@@ -182,7 +234,7 @@ def find_layers(tileset_spec):
     find_layers(tileset_spec)
     return layers
 
-def load_tile(tileset = None, time = None, bbox = None):
+def load_tile(tileset = None, time = None, bbox = None, max_size = 100):
     tileset = urllib.unquote(tileset)
     bbox = vectortile.Bbox.fromstring(bbox)
 
@@ -200,7 +252,7 @@ def load_tile(tileset = None, time = None, bbox = None):
         while True:
             size = get_layer_data_size(layer, **options)
             print "size %s at %s" % (size, options)
-            if size < 1000: break
+            if size < max_size: break
             if "tolerance" not in options:
                 options["tolerance"] = 1e-3
                 continue
@@ -209,8 +261,12 @@ def load_tile(tileset = None, time = None, bbox = None):
                 print "geom size %s at %s" % (size, options)
                 options["tolerance"] *= 10.0
                 continue
-            print "END"
-            break
+            if "radius" not in options:
+                options["radius"] = 1.0
+                continue
+            options["radius"] *= 10.0
+            if options["radius"] > 4000000:
+                break
 
         layer["data"] = get_layer_data(layer, **options)
 
