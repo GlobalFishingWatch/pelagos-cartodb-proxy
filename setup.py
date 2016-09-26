@@ -15,7 +15,7 @@ setup(
     version = "0.0.1",
     author = "Egil Moeller",
     author_email = "egil@skytruth.org",
-    license = "GPL",
+    license = "Apache 2.0",
     url = "https://github.com/GlobalFishingWatch/pelagos-cartodb-proxy",
     packages = find_packages()
 )
