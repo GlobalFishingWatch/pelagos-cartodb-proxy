@@ -186,8 +186,8 @@ def get_layer_data_points_lat_lon_sql(layer, **kw):
         select
           %(series_group_sql)s
           %(series_sql)s
-          ST_Y(the_geom) lat,
-          ST_X(the_geom) lon,
+          ST_Y(the_geom) latitude,
+          ST_X(the_geom) longitude,
           %(fields)s
         from
           (%(src)s) __wrapped__layer_data_points_lat_lng
@@ -257,18 +257,21 @@ def load_tile(tileset = None, time = None, bbox = None, max_size = 16000, **kw):
 
     layers = find_layers(tileset_spec)
 
+    cluster_methods = set()
+
     for layer in layers:
         layer['fields'] = get_layer_fields(layer)
         print "LAYER SIZE", get_layer_data_size(layer, bbox=bbox)
         print "LAYER MAX GEOM SIZE", get_layer_data_max_geometry_size(layer, bbox=bbox)
 
         options = dict(bbox=bbox)
-        
+
         while True:
             size = get_layer_data_size(layer, **options)
             print "size %s at %s" % (size, options)
             if size < max_size: break
             if "tolerance" not in options:
+                cluster_methods.add("st_simplify")
                 options["tolerance"] = 1e-3
                 continue
             geom_size = get_layer_data_max_geometry_size(layer, **options)
@@ -277,6 +280,7 @@ def load_tile(tileset = None, time = None, bbox = None, max_size = 16000, **kw):
                 options["tolerance"] *= 10.0
                 continue
             if "hashlen" not in options:
+                cluster_methods.add("geohash")
                 options["hashlen"] = 20
                 continue
             options["hashlen"] -= 1
@@ -288,9 +292,21 @@ def load_tile(tileset = None, time = None, bbox = None, max_size = 16000, **kw):
     data = reduce(operator.add,
                   [layer["data"] for layer in layers], [])
 
+    for row in data:
+        for name in ('latitude', 'longitude', 'series', 'series_group', 'weight', 'sigma'):
+            if name not in row:
+                row[name] = 0.0
+    
     print "ROWS", len(data)
 
-    return vectortile.Tile.fromdata(data)
+    meta = {
+        "tags": list(cluster_methods)
+        }
+
+    if len(data):
+        return vectortile.Tile.fromdata(data, meta)
+    else:
+        return None
 
 def load_header(tileset, **kw):
     tileset_spec = json.load(load_url(tileset))
@@ -302,7 +318,7 @@ def load_header(tileset, **kw):
         layer['fields'] = get_layer_fields(layer)
         fields.update(get_layer_fields_list(layer))
 
-    for name in ('lat', 'lon', 'series', 'series_group', 'weight', 'sigma'):
+    for name in ('latitude', 'longitude', 'series', 'series_group', 'weight', 'sigma'):
         fields.add(name)
 
     return {
