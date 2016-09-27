@@ -300,7 +300,8 @@ def load_tile(tileset = None, time = None, bbox = None, max_size = 16000, **kw):
     print "ROWS", len(data)
 
     meta = {
-        "tags": list(cluster_methods)
+        "tags": list(cluster_methods),
+        "series": len(set((row["series"] for row in data)))
         }
 
     if len(data):
