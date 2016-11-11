@@ -1,0 +1,34 @@
+sudo: false
+language: python
+
+python:
+  - "2.7"
+
+addons:
+  apt:
+    packages:
+      - zip
+      - git
+      - python-pip
+      - python-virtualenv
+      - python-dev
+      - build-essential
+      - libffi-dev
+      - libssl-dev
+      - libjpeg-dev
+
+cache:
+  directories:
+    - $HOME/.cache/pip
+
+before_install:
+  - make google-cloud-sdk/bin/gcloud
+
+before_script:
+  - make dependencies
+  - mkdir -p gae/keys
+  - echo "$UNITTEST_GOOGLEAPI_AUTH_KEY_FILE" | tr "%" "\n" > gae/keys/privatekey.pem
+  - echo "UNITTEST_GOOGLEAPI_AUTH_USER_EMAIL='$UNITTEST_GOOGLEAPI_AUTH_USER_EMAIL'" > gae/settings.py
+
+script:
+  - make test

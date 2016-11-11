@@ -8,6 +8,7 @@ import operator
 import datetime
 import json
 import sys
+import re
 
 def load_url(url):
     try:
@@ -37,6 +38,8 @@ def exec_sql(layer, **kw):
         sql_source="null"
         )
     args.update(kw)
+    if 'q' in args:
+        args['q'] = re.sub("  +", " ", args['q'])
     try:
         return json.load(
             load_url(
@@ -258,6 +261,8 @@ def load_tile(tileset = None, time = None, bbox = None, max_size = 16000, **kw):
     layers = find_layers(tileset_spec)
 
     cluster_methods = set()
+
+    print "LAYERS", len(layers)
 
     for layer in layers:
         layer['fields'] = get_layer_fields(layer)

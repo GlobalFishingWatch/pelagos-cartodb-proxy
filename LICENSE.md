@@ -1,4 +1,4 @@
-Pelagos Client copyright 2015 SkyTruth
+Pelagos CartoDB Proxy copyright 2016 SkyTruth
 
 Parts copyright 2012 Google Inc.
 

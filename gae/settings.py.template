@@ -1,0 +1,23 @@
+# By default taken from GAE
+# On dev-server taken from environment variable APPLICATION_ID or
+# gcloud config
+
+# APPLICATION_ID = "my-app"
+
+# Bucket and folder where tileset are stored. Note that the url
+# must match the bucket and folder
+
+# TILESET_BUCKET = APPLICATION_ID
+# TILESET_FOLDER = 'pelagos/data/cartodb-proxy-tiles'
+# TILESET_URL = 'http://storage.googleapis.com/%s/%s' % (TILESET_BUCKET, TILESET_FOLDER)
+
+# When running the unittests with nose, you need to authenticate to
+# the google APIS, but you don't have a running dev server to do that
+# for you. So instead you need to supply a key here. See Auth.md for
+# details on how to create a key
+
+# UNITTEST_GOOGLEAPI_AUTH_KEY_FILE = 'path/to/keys/privatekey.pem'
+
+# Must match the private key:
+# UNITTEST_GOOGLEAPI_AUTH_USER_EMAIL = 'changeme@developer.gserviceaccount.com'
+
