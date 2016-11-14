@@ -8,7 +8,7 @@ builtins:
 handlers:
 - url: /
   static_files: index.html
-  upload: /
+  upload: index.html
 
 - url: /tile.*
   script: tile_handler.app
