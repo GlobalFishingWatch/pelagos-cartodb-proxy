@@ -17,5 +17,15 @@
     <div style="margin-top:2em; display: none" id="output_box">Tileset (TiledBinFormat) URL:
       <div id="output_url" style="border: 2px solid red; padding: 3px;"></div>
     </div>
+
+    <p>Notes on the data: The CartoDB table MUST have a column called
+    "datetime" of type "datetime" (not "string"!). You should use
+    point geometries, one row per track point. If you have gaps in the
+    track, provide a column "series" with a distinct number for each
+    set of consecutive nodes. If you have tracks for multiple objects
+    (vessels, animals), provide a column "series_group" with a
+    distinct number for each object. If your points have some kind of
+    score, this should be represented on a scale from 0 to 1 in a
+    column called weight.</p>
   </body>
 </html>
