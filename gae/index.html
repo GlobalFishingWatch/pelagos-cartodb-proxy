@@ -1,0 +1,21 @@
+<html>
+  <head>
+    <title>Pelagos CartoDB proxy</title>
+    <script>
+      function convert () {
+        var base = document.location.toString();
+        var tileset = encodeURIComponent(document.getElementsByName("input_url")[0].value)
+        var version = Math.random().toString(16).replace("0.", "") + Math.random().toString(16).replace("0.", "");
+        document.getElementById("output_url").innerHTML = base + "tile/" + tileset + "/" + version;
+        document.getElementById("output_box").style.display = "block";
+      }
+    </script>
+  </head>
+  <body>
+    <div>CartoDB viz.json URL: <input type="text" name="input_url"></div>
+    <button onclick="convert()">Convert to tileset</button>
+    <div style="margin-top:2em; display: none" id="output_box">Tileset (TiledBinFormat) URL:
+      <div id="output_url" style="border: 2px solid red; padding: 3px;"></div>
+    </div>
+  </body>
+</html>
