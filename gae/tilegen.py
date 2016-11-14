@@ -6,61 +6,10 @@ import urllib
 import urllib2
 import operator
 import datetime
-import json
 import sys
 import re
-
-def load_url(url):
-    try:
-        return urllib2.urlopen(url)
-    except urllib2.HTTPError as e:
-        e.msg = e.read()
-        raise e
-
-def get_sql_url(layer, args):
-    sql_url = layer["options"]["sql_api_template"].replace("{user}", layer["options"]["user_name"]) + layer["options"]["sql_api_endpoint"]
-
-    if not args:
-        return sql_url
-
-    return "%s?%s" % (
-        sql_url,
-        "&".join(["%s=%s" % (name, urllib.quote(unicode(value)))
-                  for name, value in args.iteritems()]))
-
-def exec_sql(layer, **kw):
-    args = dict(
-        page=0,
-        sort_order="asc",
-        order_by="",
-        filter_column="",
-        filter_value="",
-        sql_source="null"
-        )
-    args.update(kw)
-    if 'q' in args:
-        args['q'] = re.sub("  +", " ", args['q'])
-    try:
-        return json.load(
-            load_url(
-                get_sql_url(layer, args)))
-    except urllib2.HTTPError as e:
-        if "q" in kw:
-            e.msg = "%s while executing %s" % (e.msg, kw["q"])
-        raise e
-
-def get_layer_fields(layer):
-    return exec_sql(
-        layer,
-        page=0,
-        sort_order="asc",
-        order_by="",
-        filter_column="",
-        filter_value="",
-        sql_source="null",
-        limit=0,
-        q=layer["options"]["sql"]
-        )["fields"]
+import cartosql
+import cartolayer
 
 def get_layer_fields_list(layer, filter = ["the_geom"], func = None, types = ["date", "number"], name_func=None):
     fields = layer["fields"].keys()
@@ -90,20 +39,15 @@ def get_layer_fields_minmax_sql(layer):
           %(fields_min)s,
           %(fields_max)s
         from
-          (%(src)s) __wrapped__layer_data
+          (%(src)s) __wrapped__layer_fielkds
     """ % {"src": layer["options"]["sql"],
            "fields_min": get_layer_fields_sql(layer, func=lambda x: "min(%s)" % convert_col(layer)(x), name_func=lambda x: "%s_min" % x),
            "fields_max": get_layer_fields_sql(layer, func=lambda x: "max(%s)" % convert_col(layer)(x), name_func=lambda x: "%s_max" % x)
            }
 
 def get_layer_data_sql(layer, bbox, **kw):
-    series_group_sql = ""
-    if "series_group" not in layer["fields"]:
-        series_group_sql = "row_number() over () as series_group,"
-
     return """
         select
-          %(series_group_sql)s
           (ST_Dump(ST_Intersection(ST_MakeEnvelope(%(lonmin)s, %(latmin)s, %(lonmax)s, %(latmax)s, 4326), the_geom))).geom as the_geom,
           %(fields)s
         from
@@ -113,7 +57,6 @@ def get_layer_data_sql(layer, bbox, **kw):
         order by
           cartodb_id asc
     """ % {"src": layer["options"]["sql"],
-           "series_group_sql": series_group_sql,
            "fields": get_layer_fields_sql(layer, func=convert_col(layer)),
            "latmin": bbox.latmin,
            "latmax": bbox.latmax,
@@ -122,20 +65,15 @@ def get_layer_data_sql(layer, bbox, **kw):
            }
 
 def get_layer_simplified_data_sql(layer, tolerance = None, **kw):
-    series_group_sql = ""
-    if "series_group" not in layer["fields"]:
-        series_group_sql = "series_group,"
     if tolerance is None:
         return get_layer_data_sql(layer, **kw)
     return """
       select
-        %(series_group_sql)s
         ST_SimplifyPreserveTopology(the_geom, %(tolerance)s) the_geom,
         %(fields)s
       from
         (%(src)s) __wrapped__layer_simplified_data
     """ % {"src": get_layer_data_sql(layer, **kw),
-           "series_group_sql": series_group_sql,
            "fields": get_layer_fields_sql(layer),
            "tolerance": tolerance
            }
@@ -147,24 +85,14 @@ def get_layer_simplified_data_sql(layer, tolerance = None, **kw):
 #   SELECT unnest(ST_ClusterWithin(geom, 100)) gc
 
 def get_layer_data_points_sql(layer, **kw):
-    series_sql = ""
-    if "series" not in layer["fields"]:
-        series_sql = "row_number() over () as series,"
-    series_group_sql = ""
-    if "series_group" not in layer["fields"]:
-        series_group_sql = "series_group,"
     return """
         select
-          %(series_group_sql)s
-          %(series_sql)s
           (ST_DumpPoints(__wrapped__layer_data_points.the_geom)).geom as the_geom,
           %(fields)s
         from
           (%(src)s) __wrapped__layer_data_points
     """ % {
         "src": get_layer_simplified_data_sql(layer, **kw),
-        "series_group_sql": series_group_sql,
-        "series_sql": series_sql,
         "fields": get_layer_fields_sql(layer)
     }
 
@@ -195,16 +123,8 @@ def get_layer_data_clustered_points_sql(layer, hashlen=None, **kw):
 
 
 def get_layer_data_points_lat_lon_sql(layer, **kw):
-    series_sql = ""
-    if "series" not in layer["fields"]:
-        series_sql = "series,"
-    series_group_sql = ""
-    if "series_group" not in layer["fields"]:
-        series_group_sql = "series_group,"
     return """
         select
-          %(series_group_sql)s
-          %(series_sql)s
           ST_Y(the_geom) latitude,
           ST_X(the_geom) longitude,
           %(fields)s
@@ -212,8 +132,6 @@ def get_layer_data_points_lat_lon_sql(layer, **kw):
           (%(src)s) __wrapped__layer_data_points_lat_lng
     """ % {
         "src": get_layer_data_clustered_points_sql(layer, **kw),
-        "series_group_sql": series_group_sql,
-        "series_sql": series_sql,
         "fields": get_layer_fields_sql(layer)
     }
 
@@ -234,25 +152,25 @@ def get_layer_data_max_geometry_size_sql(layer, **kw):
     """ % (get_layer_simplified_data_sql(layer, **kw),)
 
 def get_layer_data(layer, **kw):
-    return exec_sql(
+    return cartosql.exec_sql(
         layer,
         q=get_layer_data_points_lat_lon_sql(layer, **kw)
         )['rows']
 
 def get_layer_data_size(layer, **kw):
-    return exec_sql(
+    return cartosql.exec_sql(
         layer,
         q=get_layer_data_size_sql(layer, **kw)
         )["rows"][0]["size"]
 
 def get_layer_data_max_geometry_size(layer, **kw):
-    return exec_sql(
+    return cartosql.exec_sql(
         layer,
         q=get_layer_data_max_geometry_size_sql(layer, **kw)
         )["rows"][0]["size"]
 
 def get_layer_fields_minmax(layer):
-    row = exec_sql(
+    row = cartosql.exec_sql(
         layer,
         q=get_layer_fields_minmax_sql(layer)
         )['rows'][0]
@@ -263,37 +181,17 @@ def get_layer_fields_minmax(layer):
         res[name][measure] = value
     return res
 
-def find_layers(tileset_spec):
-    layers = []
-    def find_layers(obj, api_spec = {}):
-        if "layers" not in obj: return
-        for layer in obj["layers"]:
-            if layer["type"] == "layergroup":
-                api_spec = dict(api_spec)
-                api_spec.update({key: value
-                                for key, value in layer["options"].iteritems()
-                                if key != "layers"})
-                find_layers(layer["options"]["layer_definition"], api_spec)
-            if layer["type"] == "CartoDB":
-                layer["options"].update(api_spec)
-                layers.append(layer)
-
-    find_layers(tileset_spec)
-    return layers
 
 def load_tile(tileset = None, time = None, bbox = None, max_size = 16000, **kw):
     bbox = vectortile.Bbox.fromstring(bbox)
 
-    tileset_spec = json.load(load_url(tileset))
-
-    layers = find_layers(tileset_spec)
+    tileset_spec, layers = cartolayer.load_tileset(tileset)
 
     cluster_methods = set()
 
     print "LAYERS", len(layers)
 
     for layer in layers:
-        layer['fields'] = get_layer_fields(layer)
         print "LAYER SIZE", get_layer_data_size(layer, bbox=bbox)
         print "LAYER MAX GEOM SIZE", get_layer_data_max_geometry_size(layer, bbox=bbox)
 
@@ -325,10 +223,10 @@ def load_tile(tileset = None, time = None, bbox = None, max_size = 16000, **kw):
     data = reduce(operator.add,
                   [layer["data"] for layer in layers], [])
 
-    for row in data:
-        for name in ('latitude', 'longitude', 'series', 'series_group', 'weight', 'sigma'):
-            if name not in row:
-                row[name] = 0.0
+    # for row in data:
+    #     for name in ('latitude', 'longitude', 'series', 'series_group', 'weight', 'sigma'):
+    #         if name not in row:
+    #             row[name] = 0.0
     
     print "ROWS", len(data)
 
@@ -343,9 +241,7 @@ def load_tile(tileset = None, time = None, bbox = None, max_size = 16000, **kw):
         return None
 
 def load_header(tileset, **kw):
-    tileset_spec = json.load(load_url(tileset))
-
-    layers = find_layers(tileset_spec)
+    tileset_spec, layers = cartolayer.load_tileset(tileset)
 
     fields = {}
     def add_field(name, info = {}):
@@ -361,7 +257,6 @@ def load_header(tileset, **kw):
             fields[name]["max"] = info["max"]
 
     for layer in layers:
-        layer['fields'] = get_layer_fields(layer)
         for name in get_layer_fields_list(layer):
             add_field(name)
         for name, info in get_layer_fields_minmax(layer).iteritems():
