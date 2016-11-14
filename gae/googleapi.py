@@ -7,9 +7,7 @@ import os
 
 import config
 
-scope = ['https://www.googleapis.com/auth/bigquery',
-         #'https://www.googleapis.com/auth/devstorage.read_only',
-         'https://www.googleapis.com/auth/devstorage.read_write']
+scope = ['https://www.googleapis.com/auth/devstorage.read_write']
 
 if 'SERVER_SOFTWARE' in os.environ:
     import oauth2client.appengine
@@ -24,5 +22,4 @@ else:
 
 http = credentials.authorize(httplib2.Http(disable_ssl_certificate_validation=True))
 
-bigquery = apiclient.discovery.build('bigquery', 'v2', http=http)
 storage = apiclient.discovery.build('storage', 'v1', http=http)

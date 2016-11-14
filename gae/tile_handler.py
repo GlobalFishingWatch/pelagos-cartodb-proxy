@@ -84,6 +84,8 @@ def cache(self, tileset, version, key, do_cache = True):
 
 class HeaderHandler(corshandler.CORSHandler):
     def get(self, tileset, version):
+	logging.info("XXXX header %s/%s" % (tileset, version))
+
         tileset = urllib.unquote(tileset)
 
         @cache(self, tileset, version, "header")
@@ -93,6 +95,7 @@ class HeaderHandler(corshandler.CORSHandler):
 
 class TileHandler(corshandler.CORSHandler):
     def get(self, tileset, version, time = None, bbox = None):
+	logging.info("XXXX tile %s/%s %s;%s" % (tileset, version, time, bbox))
         tileset = urllib.unquote(tileset)
 
         @cache(self, tileset, version, bbox, do_cache = False)
@@ -103,7 +106,7 @@ class TileHandler(corshandler.CORSHandler):
             return tile
 
 app = webapp2.WSGIApplication([
-    webapp2.Route('/tile/<tileset>/<version>/header', handler=HeaderHandler),
-    webapp2.Route('/tile/<tileset>/<version>/<time>;<bbox>', handler=TileHandler),
-    webapp2.Route('/tile/<tileset>/<version>/<bbox>', handler=TileHandler)
+    webapp2.Route('/tile/<tileset:.*>/<version>/header', handler=HeaderHandler),
+    webapp2.Route('/tile/<tileset:.*>/<version>/<time>;<bbox>', handler=TileHandler),
+    webapp2.Route('/tile/<tileset:.*>/<version>/<bbox>', handler=TileHandler)
 ], debug=True)

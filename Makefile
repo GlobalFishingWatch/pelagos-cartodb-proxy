@@ -74,8 +74,8 @@ build-gae: gae/app.yaml dependencies junk-clean
 build: build-gae
 
 upload-gae: google_appengine/appcfg.py build-gae
-	google_appengine/appcfg.py update -A $(application) -V $(version) gae
-	# google-cloud-sdk/bin/gcloud preview app deploy ./gae/app.yaml --project "$(application)" --version "$(version)"
+	#google_appengine/appcfg.py update -A $(application) -V $(version) gae
+	google-cloud-sdk/bin/gcloud preview app deploy ./gae/app.yaml --project "$(application)" --version "$(version)"
 
 upload: upload-gae
 

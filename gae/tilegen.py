@@ -62,28 +62,44 @@ def get_layer_fields(layer):
         q=layer["options"]["sql"]
         )["fields"]
 
-def get_layer_fields_list(layer, filter = ["the_geom"], func = None, types = ["date", "number"]):
+def get_layer_fields_list(layer, filter = ["the_geom"], func = None, types = ["date", "number"], name_func=None):
     fields = layer["fields"].keys()
     fields = [name for name in fields if name not in filter]
     if types is not None:
         fields = [name for name in fields if
                   layer["fields"][name]["type"] in types]
     if func:
-        fields = ["%s as %s" % (func(name), name) for name in fields]
+        if not name_func: name_func = lambda x: x
+        fields = ["%s as %s" % (func(name), name_func(name)) for name in fields]
     return fields
 
 def get_layer_fields_sql(*arg, **kw):
     return ",".join(get_layer_fields_list(*arg, **kw))
 
+
+def convert_col(layer):
+    def convert_col(name):
+        if layer["fields"][name]["type"] == "date":
+            return "extract(epoch from %s at time zone 'utc') * 1000.0" % name
+        return name
+    return convert_col
+
+def get_layer_fields_minmax_sql(layer):
+    return """
+        select
+          %(fields_min)s,
+          %(fields_max)s
+        from
+          (%(src)s) __wrapped__layer_data
+    """ % {"src": layer["options"]["sql"],
+           "fields_min": get_layer_fields_sql(layer, func=lambda x: "min(%s)" % convert_col(layer)(x), name_func=lambda x: "%s_min" % x),
+           "fields_max": get_layer_fields_sql(layer, func=lambda x: "max(%s)" % convert_col(layer)(x), name_func=lambda x: "%s_max" % x)
+           }
+
 def get_layer_data_sql(layer, bbox, **kw):
     series_group_sql = ""
     if "series_group" not in layer["fields"]:
         series_group_sql = "row_number() over () as series_group,"
-
-    def convert_col(name):
-        if layer["fields"][name]["type"] == "date":
-            return "extract(epoch from %s at time zone 'utc')" % name
-        return name
 
     return """
         select
@@ -98,7 +114,7 @@ def get_layer_data_sql(layer, bbox, **kw):
           cartodb_id asc
     """ % {"src": layer["options"]["sql"],
            "series_group_sql": series_group_sql,
-           "fields": get_layer_fields_sql(layer, func=convert_col),
+           "fields": get_layer_fields_sql(layer, func=convert_col(layer)),
            "latmin": bbox.latmin,
            "latmax": bbox.latmax,
            "lonmin": bbox.lonmin,
@@ -235,6 +251,18 @@ def get_layer_data_max_geometry_size(layer, **kw):
         q=get_layer_data_max_geometry_size_sql(layer, **kw)
         )["rows"][0]["size"]
 
+def get_layer_fields_minmax(layer):
+    row = exec_sql(
+        layer,
+        q=get_layer_fields_minmax_sql(layer)
+        )['rows'][0]
+    res = {}
+    for name, value in row.iteritems():
+        name, measure = name.rsplit("_", 1)
+        if name not in res: res[name] = {}
+        res[name][measure] = value
+    return res
+
 def find_layers(tileset_spec):
     layers = []
     def find_layers(obj, api_spec = {}):
@@ -319,20 +347,34 @@ def load_header(tileset, **kw):
 
     layers = find_layers(tileset_spec)
 
-    fields = set()
+    fields = {}
+    def add_field(name, info = {}):
+        if name not in fields:
+            fields[name] = {"type": "Float32"}
+        if (    "min" in info
+            and (   "min" not in fields[name]
+                 or fields[name]["min"] > info["min"])):
+            fields[name]["min"] = info["min"]
+        if (    "max" in info
+            and (   "max" not in fields[name]
+                 or fields[name]["max"] < info["max"])):
+            fields[name]["max"] = info["max"]
+
     for layer in layers:
         layer['fields'] = get_layer_fields(layer)
-        fields.update(get_layer_fields_list(layer))
+        for name in get_layer_fields_list(layer):
+            add_field(name)
+        for name, info in get_layer_fields_minmax(layer).iteritems():
+            add_field(name, info)
 
     for name in ('latitude', 'longitude', 'series', 'series_group', 'weight', 'sigma'):
-        fields.add(name)
+        add_field(name)
 
     return {
         "tilesetName": tileset_spec["title"],
         "seriesTilesets": False,
         "infoUsesSelection": True,
-        "colsByName": {name: {"type": "Float32"}
-                       for name in fields}
+        "colsByName": fields
         }
 
 if __name__ == "__main__":
