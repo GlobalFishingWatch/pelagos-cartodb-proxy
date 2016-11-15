@@ -1,5 +1,6 @@
 import virtualenvloader
 import urllib
+import urllib2
 import config
 import json
 import tilegen
@@ -60,14 +61,17 @@ class GCSCache(object):
 
 def cache(self, tileset, version, key, do_cache = True):
     cache = GCSCache(slugify.slugify(unicode(tileset)), version)
+    def proxy_url(url):
+        conn = urllib2.urlopen(url)
+        self.response.headers['Content-Type'] = conn.info()['Content-type']
+        self.response.write(conn.read())
     def wrapper(fn):
         if not do_cache or config.TEST_SERVER or config.LOCAL_TILESETS:
             self.response.write(fn())
         else:
             url = cache.get(key)
             if url:
-                self.redirect(url)
-                return
+                return proxy_url(url)
             url = cache.get(key + "-404")
             if url:
                 self.response.status = 404
@@ -75,8 +79,7 @@ def cache(self, tileset, version, key, do_cache = True):
             data = fn()
             if data is not None:
                 url = cache.set(key, data)
-                self.redirect(url)
-                return
+                return proxy_url(url)
             cache.set(key + "-404", "EMPTY")
             self.response.status = 404
     return wrapper

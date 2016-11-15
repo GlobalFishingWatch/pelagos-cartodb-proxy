@@ -6,7 +6,7 @@ class CORSHandler(webapp2.RequestHandler):
         super(CORSHandler, self).__init__(*args, **kwargs)
         self.CORS_origins = '*'
         self.CORS_methods = ['POST', 'GET', 'OPTIONS']
-        self.CORS_headers = ['Origin', 'X-Requested-With', 'Content-Type', 'Accept']
+        self.CORS_headers = ['Origin', 'X-Requested-With', 'Content-Type', 'Accept', 'Authorization']
         self.CORS_allow_credentials = True
 
     def dispatch(self):
@@ -18,4 +18,4 @@ class CORSHandler(webapp2.RequestHandler):
         self.response.headers['Access-Control-Allow-Origin'] = origins
         if self.CORS_allow_credentials: self.response.headers['Access-Control-Allow-Credentials'] = 'true'
         self.response.headers['Access-Control-Allow-Methods'] = ', '.join(self.CORS_methods)
-        self.response.headers['Access-Control-Allow-Headers'] = ', '.join(self.CORS_methods)
+        self.response.headers['Access-Control-Allow-Headers'] = ', '.join(self.CORS_headers)
