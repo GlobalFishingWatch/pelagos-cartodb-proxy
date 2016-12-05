@@ -63,6 +63,7 @@ def cache(self, tileset, version, key, do_cache = True):
     cache = GCSCache(slugify.slugify(unicode(tileset)), version)
     def proxy_url(url):
         conn = urllib2.urlopen(url)
+        self.response.headers['Cache-Control'] = 'max-age=31556926'
         self.response.headers['Content-Type'] = conn.info()['Content-type']
         self.response.write(conn.read())
     def wrapper(fn):
@@ -74,6 +75,7 @@ def cache(self, tileset, version, key, do_cache = True):
                 return proxy_url(url)
             url = cache.get(key + "-404")
             if url:
+                self.response.headers['Cache-Control'] = 'max-age=31556926'
                 self.response.status = 404
                 return
             data = fn()
@@ -81,6 +83,7 @@ def cache(self, tileset, version, key, do_cache = True):
                 url = cache.set(key, data)
                 return proxy_url(url)
             cache.set(key + "-404", "EMPTY")
+            self.response.headers['Cache-Control'] = 'max-age=31556926'
             self.response.status = 404
     return wrapper
 
