@@ -35,11 +35,15 @@ class GCSCache(object):
         data = googleapi.storage.objects().list(bucket=config.TILESET_BUCKET,
                                                 prefix=path,
                                                 delimiter="/").execute()
-        #print "CHEK", path, ('items' in data and data['items'])
+        # print "CHEK", path, ('items' in data and data['items'])
         if 'items' in data and data['items']:
-            return path
-        else:
-            return None
+            matches = [item
+                       for item in data['items']
+                       if item["name"] == path]
+            if matches:
+                return path
+
+        return None
 
     def redirect_url(self, key):
         return config.TILESET_URL + "/" + self.namespace + "/" + self.encode(key)
@@ -104,7 +108,7 @@ class TileHandler(corshandler.CORSHandler):
 	logging.info("XXXX tile %s/%s %s;%s" % (tileset, version, time, bbox))
         tileset = urllib.unquote(tileset)
 
-        @cache(self, tileset, version, bbox, do_cache = False)
+        @cache(self, tileset, version, bbox)
         def generate_tile():
             tile = tilegen.load_tile(tileset, bbox=bbox)
             if tile is not None:
