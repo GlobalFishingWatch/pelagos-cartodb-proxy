@@ -102,13 +102,22 @@ class HeaderHandler(corshandler.CORSHandler):
         def generate_header():
             return json.dumps(tilegen.load_header(tileset))
 
+class InfoHandler(corshandler.CORSHandler):
+    def get(self, tileset, version):
+	logging.info("XXXX header %s/%s" % (tileset, version))
+
+        tileset = urllib.unquote(tileset)
+
+        @cache(self, tileset, version, "info")
+        def generate_info():
+            return json.dumps(tilegen.load_info(tileset))
 
 class TileHandler(corshandler.CORSHandler):
     def get(self, tileset, version, time = None, bbox = None):
 	logging.info("XXXX tile %s/%s %s;%s" % (tileset, version, time, bbox))
         tileset = urllib.unquote(tileset)
 
-        @cache(self, tileset, version, bbox)
+        @cache(self, tileset, version, bbox, do_cache=False)
         def generate_tile():
             tile = tilegen.load_tile(tileset, bbox=bbox)
             if tile is not None:
@@ -117,6 +126,7 @@ class TileHandler(corshandler.CORSHandler):
 
 app = webapp2.WSGIApplication([
     webapp2.Route('/tile/<tileset:.*>/<version>/header', handler=HeaderHandler),
+    webapp2.Route('/tile/<tileset:.*>/<version>/info', handler=InfoHandler),
     webapp2.Route('/tile/<tileset:.*>/<version>/<time>;<bbox>', handler=TileHandler),
     webapp2.Route('/tile/<tileset:.*>/<version>/<bbox>', handler=TileHandler)
 ], debug=True)

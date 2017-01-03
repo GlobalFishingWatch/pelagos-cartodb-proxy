@@ -1,4 +1,3 @@
-export PATH=/home/redhog/Projects/skytruth/google_appengine:$PATH
 dev_appserver.py . \
   -A world-fishing-827 \
   --appidentity_email_address 386173530526-p7k8p69etco24m3e46he3pv90teg6q0m@developer.gserviceaccount.com \

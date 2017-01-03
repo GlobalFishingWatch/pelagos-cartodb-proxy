@@ -10,6 +10,9 @@ import sys
 import re
 import cartosql
 import cartolayer
+import contextlib
+import lxml.cssselect
+import lxml.html
 
 def get_layer_fields_list(layer, filter = ["the_geom"], func = None, types = ["date", "number"], name_func=None):
     fields = layer["fields"].keys()
@@ -187,6 +190,9 @@ def load_tile(tileset = None, time = None, bbox = None, max_size = 16000, **kw):
 
     tileset_spec, layers = cartolayer.load_tileset(tileset)
 
+    if not layers:
+        raise Exception("No layers found in map:\n%s" % json.dumps(tileset_spec, indent=2))
+
     cluster_methods = set()
 
     print "LAYERS", len(layers)
@@ -271,6 +277,21 @@ def load_header(tileset, **kw):
         "infoUsesSelection": True,
         "colsByName": fields
         }
+
+def load_info(tileset, **kw):
+    tileset_spec, layers = cartolayer.load_tileset(tileset)
+
+    info = {
+        'title': tileset_spec['title'],
+        'description': tileset_spec['description']
+        }
+    metadata_link = lxml.cssselect.CSSSelector("a:contains('Metadata')")(
+        lxml.html.fromstring(info['description']))
+    if metadata_link:
+        with contextlib.closing(urllib2.urlopen(metadata_link[0].attrib['href'])) as f:
+            info.update(json.load(f)['info'])
+
+    return info
 
 if __name__ == "__main__":
     args = []
