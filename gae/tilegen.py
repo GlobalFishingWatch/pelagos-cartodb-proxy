@@ -10,6 +10,9 @@ import sys
 import re
 import cartosql
 import cartolayer
+import contextlib
+import lxml.cssselect
+import lxml.html
 
 def get_layer_fields_list(layer, filter = ["the_geom"], func = None, types = ["date", "number"], name_func=None):
     fields = layer["fields"].keys()
@@ -187,6 +190,9 @@ def load_tile(tileset = None, time = None, bbox = None, max_size = 16000, **kw):
 
     tileset_spec, layers = cartolayer.load_tileset(tileset)
 
+    if not layers:
+        raise Exception("No layers found in map:\n%s" % json.dumps(tileset_spec, indent=2))
+
     cluster_methods = set()
 
     print "LAYERS", len(layers)
@@ -271,6 +277,50 @@ def load_header(tileset, **kw):
         "infoUsesSelection": True,
         "colsByName": fields
         }
+
+def load_metadata(tileset):
+    tileset_spec, layers = cartolayer.load_tileset(tileset)
+
+    metadata_link = lxml.cssselect.CSSSelector("a:contains('Metadata')")(
+        lxml.html.fromstring(tileset_spec['description']))
+    if metadata_link:
+        with contextlib.closing(urllib2.urlopen(metadata_link[0].attrib['href'])) as f:
+            return json.load(f)
+    else:
+        return {
+            'info': {
+                'title': tileset_spec['title'],
+                'description': tileset_spec['description']
+                }
+            }
+
+def load_info(tileset):
+    return load_metadata(tileset).get("info", {})
+
+def load_info_table(tileset):
+    metadata = load_metadata(tileset)
+    if 'info_table' not in metadata:
+        raise Exception("Tileset metadata has no info_table attribute")
+    return cartolayer.load_tileset(metadata['info_table'])
+
+def load_query_info(tileset, series_group):
+    tileset_spec, layers = load_info_table(tileset)
+
+    layer = layers[0]
+    rows = cartosql.exec_sql(
+      layer,
+      q="""
+        select
+          *
+        from
+          (%(src)s) __wrapped__series_group_info
+        where
+          series_group = %(series_group)s
+      """ % {"src": layer["options"]["sql"],
+             "series_group": series_group})['rows']
+    if not rows:
+        return None
+    return rows[0]
 
 if __name__ == "__main__":
     args = []
