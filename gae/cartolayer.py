@@ -42,7 +42,7 @@ def load_layer_geometry_types(layer):
                 GeometryType(the_geom) as type
               from
                 (%(src)s) __wrapped__layer_geometry_type
-              group by type
+              group by the_geom
             """ % {"src": layer["options"]["sql"]})['rows']]
     
 def annotate_layer(layer):
