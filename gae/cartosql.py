@@ -3,6 +3,9 @@ import urllib
 import urllib2
 import operator
 import re
+import google.appengine.api.urlfetch
+
+google.appengine.api.urlfetch.set_default_fetch_deadline(60)
 
 def load_url(*arg, **kw):
     try:
