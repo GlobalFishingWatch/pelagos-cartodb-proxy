@@ -56,12 +56,12 @@ def annotate_layer(layer):
     original_fields = layer['fields'].keys()
     added_fields = []
 
-    if "series_group" not in layer['fields']:
+    if "seriesgroup" not in layer['fields']:
         if is_point_layer:
-            added_fields.append("1 as series_group")
+            added_fields.append("1 as seriesgroup")
         else:
-            added_fields.append("row_number() over () as series_group")
-        layer['fields']["series_group"] = {"type": "number"}
+            added_fields.append("row_number() over () as seriesgroup")
+        layer['fields']["seriesgroup"] = {"type": "number"}
     if "series" not in layer['fields']:
         if is_point_layer:
             added_fields.append("1 as series")

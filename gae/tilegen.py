@@ -57,8 +57,6 @@ def get_layer_data_sql(layer, bbox, **kw):
           (%(src)s) __wrapped__layer_data
         where
           ST_Contains(ST_MakeEnvelope(%(lonmin)s, %(latmin)s, %(lonmax)s, %(latmax)s, 4326), the_geom)
-        order by
-          cartodb_id asc
     """ % {"src": layer["options"]["sql"],
            "fields": get_layer_fields_sql(layer, func=convert_col(layer)),
            "latmin": bbox.latmin,
@@ -104,7 +102,7 @@ def get_layer_data_clustered_points_sql(layer, hashlen=None, **kw):
         return get_layer_data_points_sql(layer, **kw)
     return """
       select
-        100000 + row_number() over () AS series_group,
+        100000 + row_number() over () AS seriesgroup,
         100000 + row_number() over () AS series,
         ST_Centroid(ST_GeomFromGeoHash(geo_hash)) the_geom,
         %(filtered_fields)s
@@ -120,7 +118,7 @@ def get_layer_data_clustered_points_sql(layer, hashlen=None, **kw):
     """ % {
         "src": get_layer_simplified_data_sql(layer, **kw),
         "hashlen": hashlen,
-        "filtered_fields": get_layer_fields_sql(layer, filter=("sigma", "weight", "series", "series_group")),
+        "filtered_fields": get_layer_fields_sql(layer, filter=("sigma", "weight", "series", "seriesgroup")),
         "avg_fields": get_layer_fields_sql(layer, func=lambda name: "avg(%s)" % name)
     }
 
@@ -230,7 +228,7 @@ def load_tile(tileset = None, time = None, bbox = None, max_size = 16000, **kw):
                   [layer["data"] for layer in layers], [])
 
     # for row in data:
-    #     for name in ('latitude', 'longitude', 'series', 'series_group', 'weight', 'sigma'):
+    #     for name in ('latitude', 'longitude', 'series', 'seriesgroup', 'weight', 'sigma'):
     #         if name not in row:
     #             row[name] = 0.0
     
@@ -268,7 +266,7 @@ def load_header(tileset, **kw):
         for name, info in get_layer_fields_minmax(layer).iteritems():
             add_field(name, info)
 
-    for name in ('latitude', 'longitude', 'series', 'series_group', 'weight', 'sigma'):
+    for name in ('latitude', 'longitude', 'series', 'seriesgroup', 'weight', 'sigma'):
         add_field(name)
 
     return {
@@ -303,7 +301,7 @@ def load_info_table(tileset):
         raise Exception("Tileset metadata has no info_table attribute")
     return cartolayer.load_tileset(metadata['info_table'])
 
-def load_query_info(tileset, series_group):
+def load_query_info(tileset, seriesgroup):
     tileset_spec, layers = load_info_table(tileset)
 
     layer = layers[0]
@@ -313,11 +311,11 @@ def load_query_info(tileset, series_group):
         select
           *
         from
-          (%(src)s) __wrapped__series_group_info
+          (%(src)s) __wrapped__seriesgroup_info
         where
-          series_group = %(series_group)s
+          seriesgroup = %(seriesgroup)s
       """ % {"src": layer["options"]["sql"],
-             "series_group": series_group})['rows']
+             "seriesgroup": seriesgroup})['rows']
     if not rows:
         return None
     return rows[0]
