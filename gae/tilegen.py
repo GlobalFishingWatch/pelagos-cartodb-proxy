@@ -318,7 +318,11 @@ def load_query_info(tileset, seriesgroup):
              "seriesgroup": seriesgroup})['rows']
     if not rows:
         return None
-    return rows[0]
+    row = rows[0]
+    for name in ('cartodb_id', 'created_at', 'series', 'seriesgroup', 'the_geom', 'the_geom_webmercator', 'updated_at'):
+        if name in row:
+            del row[name]
+    return row
 
 if __name__ == "__main__":
     args = []
