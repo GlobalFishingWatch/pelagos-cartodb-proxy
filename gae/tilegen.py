@@ -13,6 +13,7 @@ import cartolayer
 import contextlib
 import lxml.cssselect
 import lxml.html
+import tms
 
 def get_layer_fields_list(layer, filter = ["the_geom"], func = None, types = ["date", "number"], name_func=None):
     fields = layer["fields"].keys()
@@ -49,6 +50,18 @@ def get_layer_fields_minmax_sql(layer):
            }
 
 def get_layer_data_sql(layer, bbox, **kw):
+    info = {"src": layer["options"]["sql"],
+            "fields": get_layer_fields_sql(layer, func=convert_col(layer))}    
+    if isinstance(bbox, tms.TMSBbox):
+        info['bbox'] = "ST_Contains(ST_MakeEnvelope(%(left)s, %(top)s, %(right)s, %(bottom)s, 3857), ST_Transform(the_geom, 3857))" % bbox.to3857()
+    else:
+        info['bbox'] = "ST_Contains(ST_MakeEnvelope(%(lonmin)s, %(latmin)s, %(lonmax)s, %(latmax)s, 4326), the_geom)" % {
+            "latmin": bbox.latmin,
+            "latmax": bbox.latmax,
+            "lonmin": bbox.lonmin,
+            "lonmax": bbox.lonmax
+            }
+
     return """
         select
           (ST_Dump(ST_Intersection(ST_MakeEnvelope(%(lonmin)s, %(latmin)s, %(lonmax)s, %(latmax)s, 4326), the_geom))).geom as the_geom,
@@ -56,14 +69,8 @@ def get_layer_data_sql(layer, bbox, **kw):
         from
           (%(src)s) __wrapped__layer_data
         where
-          ST_Contains(ST_MakeEnvelope(%(lonmin)s, %(latmin)s, %(lonmax)s, %(latmax)s, 4326), the_geom)
-    """ % {"src": layer["options"]["sql"],
-           "fields": get_layer_fields_sql(layer, func=convert_col(layer)),
-           "latmin": bbox.latmin,
-           "latmax": bbox.latmax,
-           "lonmin": bbox.lonmin,
-           "lonmax": bbox.lonmax
-           }
+          %(bbox)s
+    """ % info
 
 def get_layer_simplified_data_sql(layer, tolerance = None, **kw):
     if tolerance is None:
@@ -184,7 +191,12 @@ def get_layer_fields_minmax(layer):
 
 
 def load_tile(tileset = None, time = None, bbox = None, max_size = 16000, **kw):
-    bbox = vectortile.Bbox.fromstring(bbox)
+    if len(bbox.split(",")) == 4:
+        bbox = vectortile.Bbox.fromstring(bbox)
+    elif len(bbox.split(",")) == 3:
+        bbox = tms.TMSBbox.fromstring(bbox)
+    else:
+        raise Exception("Unrecognized bbox: %s" % (bbox,))
 
     tileset_spec, layers = cartolayer.load_tileset(tileset)
 
