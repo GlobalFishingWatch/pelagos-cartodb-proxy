@@ -16,12 +16,16 @@ class TMSBbox(object):
     initialResolution = 2 * math.pi * 6378137
 
     def to3857(self):
-        res = self.initialResolution / (2**self.zoom)
+        scale = 2**self.zoom
+        res = self.initialResolution / scale
+        
+        y = scale - self.y
+
         mx1 = self.x * res - self.originShift
-        my1 = self.y * res - self.originShift
+        my1 = y * res - self.originShift
 
         mx2 = (self.x+1) * res - self.originShift
-        my2 = (self.y+1) * res - self.originShift
+        my2 = (y+1) * res - self.originShift
         return {"left": mx1,
                 "top": my1,
                 "right": mx2,

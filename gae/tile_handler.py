@@ -129,7 +129,7 @@ class TileHandler(corshandler.CORSHandler):
 	logging.info("XXXX tile %s/%s %s;%s" % (tileset, version, time, bbox))
         tileset = urllib.unquote(tileset)
 
-        @cache(self, tileset, version, bbox)
+        @cache(self, tileset, version, bbox, do_cache=False)
         def generate_tile():
             tile = tilegen.load_tile(tileset, bbox=bbox)
             if tile is not None:

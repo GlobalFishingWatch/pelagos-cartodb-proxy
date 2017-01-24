@@ -53,23 +53,25 @@ def get_layer_data_sql(layer, bbox, **kw):
     info = {"src": layer["options"]["sql"],
             "fields": get_layer_fields_sql(layer, func=convert_col(layer))}    
     if isinstance(bbox, tms.TMSBbox):
-        info['bbox'] = "ST_Contains(ST_MakeEnvelope(%(left)s, %(top)s, %(right)s, %(bottom)s, 3857), ST_Transform(the_geom, 3857))" % bbox.to3857()
+        coords = bbox.to3857()
+        info['bbox'] = 'ST_Transform(ST_MakeEnvelope(%(left)s, %(top)s, %(right)s, %(bottom)s, 3857), 4326)' % coords
     else:
-        info['bbox'] = "ST_Contains(ST_MakeEnvelope(%(lonmin)s, %(latmin)s, %(lonmax)s, %(latmax)s, 4326), the_geom)" % {
+        coords = {
             "latmin": bbox.latmin,
             "latmax": bbox.latmax,
             "lonmin": bbox.lonmin,
             "lonmax": bbox.lonmax
             }
+        info['bbox'] = "ST_MakeEnvelope(%(lonmin)s, %(latmin)s, %(lonmax)s, %(latmax)s, 4326)" % coords
 
     return """
         select
-          (ST_Dump(ST_Intersection(ST_MakeEnvelope(%(lonmin)s, %(latmin)s, %(lonmax)s, %(latmax)s, 4326), the_geom))).geom as the_geom,
+          (ST_Dump(ST_Intersection(%(bbox)s, the_geom))).geom as the_geom,
           %(fields)s
         from
           (%(src)s) __wrapped__layer_data
         where
-          %(bbox)s
+          ST_Contains(%(bbox)s, the_geom)
     """ % info
 
 def get_layer_simplified_data_sql(layer, tolerance = None, **kw):
